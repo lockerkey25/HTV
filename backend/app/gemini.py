@@ -209,6 +209,89 @@ async def analyze_tray(
     raise AnalysisUnavailable("; ".join(errors))
 
 
+HEALTH_PROMPT = """You are assisting nursing-home care staff by reviewing a resident's
+30-day nutrition summary. You are NOT giving a diagnosis — you flag patterns that a
+doctor or dietitian should review, and suggest practical next steps.
+
+Resident profile:
+{profile}
+
+30-day average daily intake (meals + supplements) vs recommended target range:
+{nutrients}
+
+Other signals:
+{signals}
+
+Based ONLY on the nutrient patterns and profile above, produce a JSON object with:
+- "flags": a list of conditions worth a doctor's check, each with:
+    - "condition": one of Osteoporosis, Sarcopenia, Anemia, Type 2 Diabetes,
+      Cardiovascular Disease, Malnutrition, Vitamin D deficiency, Vitamin B12 deficiency,
+      Dehydration, or another relevant nutrition-linked condition
+    - "severity": "high" or "medium"
+    - "reason": one or two plain sentences linking the nutrient pattern to the concern
+- "recommendations": a list of concrete next steps, each with:
+    - "action": short imperative (e.g. "Order a serum ferritin test", "Add iron-rich foods")
+    - "detail": one sentence explaining the action
+- "menu_suggestions": a list of specific foods that would raise the most deficient nutrients
+- "summary": two or three sentences a nurse could read at shift handoff
+
+Be specific and link every flag to the data. Do not invent lab values. This is decision
+support for staff, not a medical diagnosis."""
+
+
+class HealthFlag(BaseModel):
+    condition: str
+    severity: str
+    reason: str
+
+
+class HealthRecommendation(BaseModel):
+    action: str
+    detail: str
+
+
+class HealthAssessment(BaseModel):
+    flags: list[HealthFlag]
+    recommendations: list[HealthRecommendation]
+    menu_suggestions: list[str]
+    summary: str
+
+
+async def assess_health(profile: str, nutrients: str, signals: str) -> HealthAssessment:
+    """Gemini-generated health review from the 30-day nutrition summary."""
+    if config.MODE == "mock":
+        return HealthAssessment(
+            flags=[HealthFlag(condition="Anemia", severity="medium",
+                              reason="(mock) Average iron intake is below the recommended minimum.")],
+            recommendations=[HealthRecommendation(action="Review with doctor",
+                                                  detail="(mock) Consider a serum ferritin test.")],
+            menu_suggestions=["Minced beef with gravy", "Spinach (creamed)"],
+            summary="(mock) Gemini was not called. This is placeholder decision-support text.",
+        )
+
+    prompt = HEALTH_PROMPT.format(profile=profile, nutrients=nutrients, signals=signals)
+    errors = []
+    for model in dict.fromkeys([config.GEMINI_MODEL, config.GEMINI_FALLBACK_MODEL]):
+        try:
+            resp = await _get_client().aio.models.generate_content(
+                model=model,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=HealthAssessment,
+                    temperature=0.2,
+                    thinking_config=types.ThinkingConfig(thinking_level=config.GEMINI_THINKING_LEVEL),
+                ),
+            )
+            if isinstance(resp.parsed, HealthAssessment):
+                return resp.parsed
+            return HealthAssessment.model_validate(json.loads(resp.text))
+        except Exception as e:
+            log.warning("Gemini health assessment model %s failed: %s", model, e)
+            errors.append(f"{model}: {type(e).__name__}")
+    raise AnalysisUnavailable("; ".join(errors))
+
+
 async def check_before_tray(items: list[dict], before: bytes) -> BeforeCheck:
     """Analyse just the before photo: what's visible, what's missing, what's extra.
     Returns a mock result when NOURISH_MODE=mock."""

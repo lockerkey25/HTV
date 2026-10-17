@@ -42,6 +42,30 @@ export function ageGroup(dob: string): '51-70' | '71+' {
   return age >= 71 ? '71+' : '51-70';
 }
 
+export type IntakeSummary = {
+  days_with_full_logs: number;
+  meals_missed: number;
+  average: Record<string, number | null>;
+  severe_alerts: string[];
+  warning_alerts: string[];
+};
+
+export type HealthFlag = { condition: string; severity: 'high' | 'medium'; reason: string };
+export type HealthRecommendation = { action: string; detail: string };
+export type HealthAssessment = {
+  flags: HealthFlag[];
+  recommendations: HealthRecommendation[];
+  menu_suggestions: string[];
+  summary: string;
+};
+
+export const getHealthAssessment = (residentId: number) =>
+  request<HealthAssessment>(`/api/residents/${residentId}/health-assessment`, undefined, 60000);
+
+export const getIntakeSummary = (residentId: number) =>
+  request<{ summary: IntakeSummary }>(`/api/residents/${residentId}/intake-history?days=30`)
+    .then((d) => d.summary);
+
 export const getWeight = (residentId: number) =>
   request<{ weight_kg: number | null; log_date: string }>(`/api/residents/${residentId}/weight`);
 
@@ -168,6 +192,21 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = 15000): 
 export const getResidents = () => request<Resident[]>('/api/residents');
 
 export const getMeals = (residentId: number) => request<Meal[]>(`/api/residents/${residentId}/meals`);
+
+export type MenuItemWithSafety = MenuItem & {
+  safety?: 'safe' | 'warning' | 'block';
+  safety_warnings?: string[];
+};
+
+export const getMenuItems = (residentId: number) =>
+  request<MenuItemWithSafety[]>(`/api/menu-items?resident_id=${residentId}`);
+
+export const updateMealItems = (mealId: number, menuItemIds: number[]) =>
+  request<Meal>(`/api/meals/${mealId}/items`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ menu_item_ids: menuItemIds }),
+  });
 
 export type SupplementLog = {
   id: number;

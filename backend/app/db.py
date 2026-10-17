@@ -182,7 +182,7 @@ TODAY_MEALS = {
         "dinner": ["Baked salmon", "White rice", "Chicken noodle soup"],
     },
     1: {
-        "breakfast": ["Scrambled eggs"],
+        "breakfast": ["Scrambled eggs", "Vanilla yogurt", "Oatmeal"],
         "lunch": ["Minced beef with gravy", "Mashed potatoes", "Pureed carrots"],
         "dinner": ["Baked salmon", "White rice", "Steamed broccoli"],
     },
