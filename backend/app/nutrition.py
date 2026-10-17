@@ -1,7 +1,8 @@
 """Deterministic nutrient math. No AI here: served portion x percent eaten x per-serving values."""
 from .schemas import Nutrients
 
-FIELDS = ("kcal", "protein_g", "iron_mg", "calcium_mg", "sodium_mg")
+FIELDS = ("kcal", "protein_g", "fat_g", "cholesterol_mg", "iron_mg", "calcium_mg",
+          "sodium_mg", "sugar_g", "vitamin_c_mg", "vitamin_d_mcg", "vitamin_b12_mcg")
 
 
 def served(item: dict) -> Nutrients:

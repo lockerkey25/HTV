@@ -12,8 +12,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from . import analysis, config, db, gemini, images, nutrition
-from .schemas import AnalyzeResponse, ConfirmRequest, ConfirmResponse, TrayAnalysis
+from . import analysis, config, db, diet_rules, gemini, images, nutrition
+from .schemas import AnalyzeResponse, BeforeCheckResponse, ConfirmRequest, ConfirmResponse, TrayAnalysis
 
 logging.basicConfig(level=logging.INFO)
 
@@ -38,6 +38,107 @@ def root():
 @app.get("/api/health")
 def health():
     return {"ok": True, "mode": config.MODE, "model": config.GEMINI_MODEL}
+
+
+@app.get("/api/meals/unlogged")
+def unlogged_meals(meal_type: str, meal_date: str | None = None):
+    """Return residents who have a 'served' (not confirmed) meal of the given type today."""
+    meal_date = meal_date or date.today().isoformat()
+    with db.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT r.id AS resident_id, r.name, r.room, m.id AS meal_id, m.meal_type, m.meal_date
+            FROM meals m
+            JOIN residents r ON r.id = m.resident_id
+            WHERE m.meal_type = ? AND m.meal_date = ? AND m.status = 'served'
+            ORDER BY r.room
+            """,
+            (meal_type, meal_date),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.get("/api/residents/{resident_id}/weight")
+def get_weight_log(resident_id: int, log_date: str | None = None):
+    log_date = log_date or date.today().isoformat()
+    with db.connect() as conn:
+        if db.get_resident(conn, resident_id) is None:
+            raise HTTPException(404, "resident not found")
+        row = conn.execute(
+            "SELECT weight_kg, log_date FROM weight_logs WHERE resident_id = ? AND log_date = ?",
+            (resident_id, log_date),
+        ).fetchone()
+        return {"weight_kg": row["weight_kg"] if row else None, "log_date": log_date}
+
+
+@app.post("/api/residents/{resident_id}/weight")
+def log_weight(resident_id: int, body: dict):
+    weight_kg = body.get("weight_kg")
+    log_date = body.get("log_date") or date.today().isoformat()
+    if weight_kg is None or not (30 <= float(weight_kg) <= 200):
+        raise HTTPException(422, "weight_kg must be between 30 and 200")
+    with db.connect() as conn:
+        if db.get_resident(conn, resident_id) is None:
+            raise HTTPException(404, "resident not found")
+        conn.execute(
+            """
+            INSERT INTO weight_logs (resident_id, log_date, weight_kg)
+            VALUES (?, ?, ?)
+            ON CONFLICT(resident_id, log_date)
+            DO UPDATE SET weight_kg = excluded.weight_kg, logged_at = datetime('now')
+            """,
+            (resident_id, log_date, float(weight_kg)),
+        )
+    return {"ok": True}
+
+
+@app.get("/api/supplements")
+def list_supplements():
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM supplements ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.get("/api/residents/{resident_id}/supplements")
+def get_supplement_logs(resident_id: int, log_date: str | None = None):
+    log_date = log_date or date.today().isoformat()
+    with db.connect() as conn:
+        if db.get_resident(conn, resident_id) is None:
+            raise HTTPException(404, "resident not found")
+        rows = conn.execute(
+            """
+            SELECT s.id, s.name, s.nutrient, s.unit, s.amount_per_tablet,
+                   COALESCE(sl.tablets, 0) AS tablets
+            FROM supplements s
+            LEFT JOIN supplement_logs sl
+                ON sl.supplement_id = s.id
+                AND sl.resident_id = ?
+                AND sl.log_date = ?
+            ORDER BY s.name
+            """,
+            (resident_id, log_date),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.post("/api/residents/{resident_id}/supplements")
+def log_supplements(resident_id: int, body: dict, log_date: str | None = None):
+    """body: {supplement_id: tablets, ...}"""
+    log_date = log_date or date.today().isoformat()
+    with db.connect() as conn:
+        if db.get_resident(conn, resident_id) is None:
+            raise HTTPException(404, "resident not found")
+        for supp_id, tablets in body.items():
+            conn.execute(
+                """
+                INSERT INTO supplement_logs (resident_id, supplement_id, log_date, tablets)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(resident_id, supplement_id, log_date)
+                DO UPDATE SET tablets = excluded.tablets, logged_at = datetime('now')
+                """,
+                (resident_id, int(supp_id), log_date, int(tablets)),
+            )
+    return {"ok": True}
 
 
 @app.get("/api/residents")
@@ -68,6 +169,70 @@ def get_meal(meal_id: int):
     if meal is None:
         raise HTTPException(404, "meal not found")
     return meal
+
+
+@app.post("/api/meals/{meal_id}/check-before", response_model=BeforeCheckResponse)
+async def check_before(meal_id: int, before: UploadFile = File(...)):
+    """Analyse the before photo only: check diet rules and what's visible on the tray."""
+    with db.connect() as conn:
+        meal = db.get_meal(conn, meal_id)
+        if meal is None:
+            raise HTTPException(404, "meal not found")
+        resident = db.get_resident(conn, meal["resident_id"])
+
+    try:
+        before_img = images.normalize(await before.read())
+    except images.InvalidImage as e:
+        raise HTTPException(400, f"invalid image: {e}")
+
+    try:
+        result = await gemini.check_before_tray(meal["items"], before_img)
+    except gemini.AnalysisUnavailable as e:
+        raise HTTPException(503, f"analysis unavailable ({e})")
+
+    # Build a lookup of menu item details by id.
+    item_map = {it["id"]: it for it in meal["items"]}
+
+    # Check diet rules against ALL served items (texture/allergy violations apply regardless of visibility).
+    alerts = diet_rules.check_tray(resident, meal["items"], result.extra_items)
+
+    # Check preferences — find tray items (menu + extra) that match any preference keyword.
+    preferences = resident.get("preferences", [])
+    preference_conflicts: list[str] = []
+    all_tray_names = [item_map[c.menu_item_id]["name"] for c in result.items if c.visible and c.menu_item_id in item_map] + result.extra_items
+    for pref in preferences:
+        pref_lower = pref.lower()
+        for item_name in all_tray_names:
+            item_lower = item_name.lower()
+            # Match if any word in the preference (>3 chars) appears in the item name
+            if any(word in item_lower for word in pref_lower.split() if len(word) > 3):
+                conflict_msg = f"{item_name} — {pref}"
+                if conflict_msg not in preference_conflicts:
+                    preference_conflicts.append(conflict_msg)
+        # Also check if the full preference string contains the item name
+        for item_name in all_tray_names:
+            item_lower = item_name.lower()
+            if any(word in pref_lower for word in item_lower.split() if len(word) > 3):
+                conflict_msg = f"{item_name} — {pref}"
+                if conflict_msg not in preference_conflicts:
+                    preference_conflicts.append(conflict_msg)
+
+    return BeforeCheckResponse(
+        quality=result.quality.value,
+        menu_items_visible=[
+            {
+                "id": c.menu_item_id,
+                "name": item_map[c.menu_item_id]["name"] if c.menu_item_id in item_map else str(c.menu_item_id),
+                "visible": c.visible,
+                "description": c.description,
+                "confidence": c.confidence.value if hasattr(c, "confidence") and c.confidence else None,
+            }
+            for c in result.items
+        ],
+        extra_items=result.extra_items,
+        diet_alerts=alerts,
+        preference_conflicts=preference_conflicts,
+    )
 
 
 @app.post("/api/meals/{meal_id}/analyze", response_model=AnalyzeResponse)
@@ -140,3 +305,13 @@ def confirm_meal(meal_id: int, body: ConfirmRequest):
         totals_consumed=nutrition.total([nutrition.consumed(served[m], p) for m, p in given.items()]),
         adjusted_items=[m for m, p in given.items() if m in ai_pcts and ai_pcts[m] != p],
     )
+
+from . import analysis, config, db, diet_rules, gemini, images, longterm, nutrition   # add longterm
+
+@app.get("/api/residents/{resident_id}/intake-history")
+def intake_history(resident_id: int, days: int = 30):
+    with db.connect() as conn:
+        resident = db.get_resident(conn, resident_id)
+        if resident is None:
+            raise HTTPException(404, "resident not found")
+        return longterm.intake_history(conn, resident, days)

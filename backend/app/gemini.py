@@ -9,9 +9,10 @@ import logging
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 
 from . import config
-from .schemas import TrayAnalysis
+from .schemas import TrayAnalysis, ImageQuality, Confidence
 
 log = logging.getLogger("nourish.gemini")
 
@@ -61,6 +62,37 @@ each photo, and notes (one or two short factual sentences about what was left).
 
 Describe only what is visible. Do not give medical advice or diagnoses.
 Return one entry in "items" for every served id, using exactly those ids."""
+
+BEFORE_PROMPT = """You are assisting nursing staff in a long-term care facility.
+You are given a single photo of a meal tray BEFORE the resident eats.
+
+The kitchen says these items were served (id: name, food group):
+{menu}
+
+1. INVENTORY. List every food, drink and condiment you can see and where it is.
+2. MATCH. For each served id, decide if it is actually visible in the photo.
+   - Match by appearance, not exact wording.
+   - Set visible=true if you can see it, false if you cannot.
+3. EXTRAS. Every food, drink or condiment visible that is NOT in the served list goes in extra_items.
+
+Also report image quality.
+Describe only what is visible. Do not give medical advice or diagnoses.
+Return one entry in "items" for every served id, using exactly those ids."""
+
+
+class BeforeItemCheck(BaseModel):
+    menu_item_id: int
+    visible: bool
+    description: str = Field(description="Short description of what you see, or 'not visible'")
+    confidence: Confidence = Field(description="How confident are you this item is visible: high, medium, or low")
+
+
+class BeforeCheck(BaseModel):
+    inventory: str = Field(description="List every food/drink/condiment visible and its position")
+    quality: ImageQuality
+    items: list[BeforeItemCheck]
+    extra_items: list[str] = Field(description="Names of foods visible but not on the served list")
+
 
 _client: genai.Client | None = None
 
@@ -174,4 +206,42 @@ async def analyze_tray(
     cached = _cache_read(key)
     if cached is not None:
         return cached, "cache", "cache"
+    raise AnalysisUnavailable("; ".join(errors))
+
+
+async def check_before_tray(items: list[dict], before: bytes) -> BeforeCheck:
+    """Analyse just the before photo: what's visible, what's missing, what's extra.
+    Returns a mock result when NOURISH_MODE=mock."""
+    if config.MODE == "mock":
+        return BeforeCheck(
+            inventory="(mock) Full tray visible.",
+            quality=ImageQuality.ok,
+            items=[BeforeItemCheck(menu_item_id=it["id"], visible=True, confidence=Confidence.high, description=f"(mock) {it['name']} present") for it in items],
+            extra_items=[],
+        )
+
+    menu = "\n".join(f"  {it['id']}: {it['name']} ({it['food_group']})" for it in items)
+    prompt = BEFORE_PROMPT.format(menu=menu)
+
+    errors = []
+    for model in dict.fromkeys([config.GEMINI_MODEL, config.GEMINI_FALLBACK_MODEL]):
+        try:
+            resp = await _get_client().aio.models.generate_content(
+                model=model,
+                contents=[prompt, "Tray photo (BEFORE):", types.Part.from_bytes(data=before, mime_type="image/jpeg")],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=BeforeCheck,
+                    temperature=0,
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_HIGH,
+                    thinking_config=types.ThinkingConfig(thinking_level=config.GEMINI_THINKING_LEVEL),
+                ),
+            )
+            if isinstance(resp.parsed, BeforeCheck):
+                return resp.parsed
+            return BeforeCheck.model_validate(json.loads(resp.text))
+        except Exception as e:
+            log.warning("Gemini before-check model %s failed: %s", model, e)
+            errors.append(f"{model}: {type(e).__name__}")
+
     raise AnalysisUnavailable("; ".join(errors))

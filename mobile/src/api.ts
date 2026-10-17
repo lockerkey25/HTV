@@ -26,7 +26,31 @@ export type Resident = {
   texture: string;
   diet_flags: string[];
   allergies: string[];
+  preferences: string[];
+  sex: 'male' | 'female';
+  dob: string;
+  height_cm: number;
+  conditions: string[];
+  medications: { name: string; dose_per_day: string }[];
 };
+
+export function ageGroup(dob: string): '51-70' | '71+' {
+  const birth = new Date(dob);
+  const today = new Date();
+  const age = today.getFullYear() - birth.getFullYear() -
+    (today < new Date(today.getFullYear(), birth.getMonth(), birth.getDate()) ? 1 : 0);
+  return age >= 71 ? '71+' : '51-70';
+}
+
+export const getWeight = (residentId: number) =>
+  request<{ weight_kg: number | null; log_date: string }>(`/api/residents/${residentId}/weight`);
+
+export const saveWeight = (residentId: number, weight_kg: number) =>
+  request<{ ok: boolean }>(`/api/residents/${residentId}/weight`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ weight_kg }),
+  });
 
 export type MenuItem = {
   id: number;
@@ -37,9 +61,15 @@ export type MenuItem = {
   servings: number;
   kcal: number;
   protein_g: number;
+  fat_g: number;
+  cholesterol_mg: number;
   iron_mg: number;
   calcium_mg: number;
   sodium_mg: number;
+  sugar_g: number;
+  vitamin_c_mg: number;
+  vitamin_d_mcg: number;
+  vitamin_b12_mcg: number;
 };
 
 export type Meal = {
@@ -54,9 +84,15 @@ export type Meal = {
 export type Nutrients = {
   kcal: number;
   protein_g: number;
+  fat_g: number;
+  cholesterol_mg: number;
   iron_mg: number;
   calcium_mg: number;
   sodium_mg: number;
+  sugar_g: number;
+  vitamin_c_mg: number;
+  vitamin_d_mcg: number;
+  vitamin_b12_mcg: number;
 };
 
 export type AnalyzedItem = {
@@ -133,6 +169,39 @@ export const getResidents = () => request<Resident[]>('/api/residents');
 
 export const getMeals = (residentId: number) => request<Meal[]>(`/api/residents/${residentId}/meals`);
 
+export type SupplementLog = {
+  id: number;
+  name: string;
+  nutrient: string;
+  unit: string;
+  amount_per_tablet: number;
+  tablets: number;
+};
+
+export const getSupplementLogs = (residentId: number) =>
+  request<SupplementLog[]>(`/api/residents/${residentId}/supplements`);
+
+export const saveSupplementLogs = (residentId: number, logs: Record<number, number>) =>
+  request<{ ok: boolean }>(`/api/residents/${residentId}/supplements`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(logs),
+  });
+
+export type UnloggedMeal = {
+  resident_id: number;
+  name: string;
+  room: string;
+  meal_id: number;
+  meal_type: 'breakfast' | 'lunch' | 'dinner';
+  meal_date: string;
+};
+
+export const getUnloggedMeals = (mealType: string, mealDate?: string) => {
+  const params = mealDate ? `?meal_type=${mealType}&meal_date=${mealDate}` : `?meal_type=${mealType}`;
+  return request<UnloggedMeal[]>(`/api/meals/unlogged${params}`);
+};
+
 async function appendImage(form: FormData, field: string, uri: string) {
   if (Platform.OS === 'web') {
     const blob = await (await fetch(uri)).blob();
@@ -142,6 +211,28 @@ async function appendImage(form: FormData, field: string, uri: string) {
     // An expo-file-system File implements the Blob interface, so it can be appended directly.
     form.append(field, new File(uri) as unknown as Blob, `${field}.jpg`);
   }
+}
+
+export type BeforeCheckItem = {
+  id: number;
+  name: string;
+  visible: boolean;
+  description: string;
+  confidence: 'high' | 'medium' | 'low' | null;
+};
+
+export type BeforeCheckResponse = {
+  quality: string;
+  menu_items_visible: BeforeCheckItem[];
+  extra_items: string[];
+  diet_alerts: DietAlert[];
+  preference_conflicts: string[]; // items on tray that conflict with resident preferences
+};
+
+export async function checkBeforeMeal(mealId: number, beforeUri: string): Promise<BeforeCheckResponse> {
+  const form = new FormData();
+  await appendImage(form, 'before', beforeUri);
+  return request<BeforeCheckResponse>(`/api/meals/${mealId}/check-before`, { method: 'POST', body: form }, 60000);
 }
 
 export async function analyzeMeal(mealId: number, beforeUri: string, afterUri: string) {

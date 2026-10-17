@@ -58,9 +58,15 @@ class TrayAnalysis(BaseModel):
 class Nutrients(BaseModel):
     kcal: float = 0
     protein_g: float = 0
+    fat_g: float = 0
+    cholesterol_mg: float = 0
     iron_mg: float = 0
     calcium_mg: float = 0
     sodium_mg: float = 0
+    sugar_g: float = 0
+    vitamin_c_mg: float = 0
+    vitamin_d_mcg: float = 0
+    vitamin_b12_mcg: float = 0
 
 
 class AnalyzedItem(BaseModel):
@@ -96,6 +102,14 @@ class AnalyzeResponse(BaseModel):
     review_reasons: list[str]
     extra_items: list[ExtraItem]    # seen on tray but not on the menu; not counted in nutrients
     notes: str
+
+
+class BeforeCheckResponse(BaseModel):
+    quality: str
+    menu_items_visible: list[dict]   # [{id, name, visible, description}]
+    extra_items: list[str]           # names of extra foods spotted
+    diet_alerts: list[DietAlert]     # allergy / texture / sodium violations
+    preference_conflicts: list[str]  # items on tray that conflict with resident preferences
 
 
 class ConfirmItem(BaseModel):
