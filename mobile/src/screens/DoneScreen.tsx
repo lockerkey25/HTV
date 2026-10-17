@@ -16,8 +16,12 @@ export function DoneScreen({ resident, meal, result, onNext }: Props) {
             ~{result.overall_percent_eaten}% eaten
           </Text>
           <Text style={styles.meta}>
-            {Math.round(t.kcal)} kcal · {t.protein_g.toFixed(1)} g protein · {t.iron_mg.toFixed(1)} mg iron ·{' '}
-            {Math.round(t.calcium_mg)} mg calcium
+            {Math.round(t.kcal)} kcal · {t.protein_g.toFixed(1)} g protein · {t.fat_g.toFixed(1)} g fat ·{' '}
+            {Math.round(t.cholesterol_mg)} mg cholesterol · {t.sodium_mg.toFixed(0)} mg sodium
+          </Text>
+          <Text style={styles.meta}>
+            {t.iron_mg.toFixed(1)} mg iron · {Math.round(t.calcium_mg)} mg calcium · {t.sugar_g.toFixed(1)} g sugar ·{' '}
+            {t.vitamin_c_mg.toFixed(1)} mg vit C · {t.vitamin_d_mcg.toFixed(1)} mcg vit D · {t.vitamin_b12_mcg.toFixed(1)} mcg vit B12
           </Text>
           {result.adjusted_items.length > 0 && (
             <Text style={styles.adjusted}>

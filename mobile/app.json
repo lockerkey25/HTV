@@ -15,7 +15,8 @@
           "photosPermission": "Nourish lets you pick saved tray photos to estimate how much was eaten."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-notifications"
     ],
     "version": "1.0.0",
     "orientation": "portrait",

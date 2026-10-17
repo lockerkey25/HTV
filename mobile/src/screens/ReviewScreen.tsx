@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { AnalyzeResponse, confirmMeal, ConfirmResponse, Meal, MenuItem, Resident } from '../api';
 import { Banner, Button, Card, Header } from '../components/ui';
 import { colors, mealLabel } from '../theme';
-
-const PRESETS = [0, 25, 50, 75, 100];
 
 type Props = {
   resident: Resident;
@@ -64,11 +63,6 @@ export function ReviewScreen({ resident, meal, analysis, onConfirmed, onBack }: 
           <Text style={styles.source}>Manual entry: set how much of each item was eaten.</Text>
         )}
 
-        {analysis?.diet_alerts.map((a, i) => (
-          <Banner key={`d${i}`} tone={a.severity === 'high' ? 'danger' : 'warn'}>
-            {a.severity === 'high' ? '⚠ ' : ''}{a.message}
-          </Banner>
-        ))}
         {analysis?.review_reasons.map((r, i) => (
           <Banner key={`r${i}`} tone="warn">{r}</Banner>
         ))}
@@ -96,21 +90,21 @@ export function ReviewScreen({ resident, meal, analysis, onConfirmed, onBack }: 
               {ai?.observation ? <Text style={styles.observation}>{ai.observation}</Text> : null}
               {changed && <Text style={styles.changed}>Adjusted from AI estimate of {ai!.percent_eaten}%</Text>}
 
-              <View style={styles.presets}>
-                <Step label="−5" a11y={`Decrease ${it.name} by 5 percent`} onPress={() => set(it.id, (value ?? 0) - 5)} />
-                {PRESETS.map((p) => (
-                  <Pressable
-                    key={p}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${it.name} ${p} percent eaten`}
-                    accessibilityState={{ selected: value === p }}
-                    onPress={() => set(it.id, p)}
-                    style={[styles.chip, value === p && styles.chipOn]}
-                  >
-                    <Text style={[styles.chipText, value === p && styles.chipTextOn]}>{p}</Text>
-                  </Pressable>
-                ))}
-                <Step label="+5" a11y={`Increase ${it.name} by 5 percent`} onPress={() => set(it.id, (value ?? 0) + 5)} />
+              <View style={styles.sliderRow}>
+                <Text style={styles.sliderLabel}>0%</Text>
+                <Slider
+                  style={styles.slider}
+                  minimumValue={0}
+                  maximumValue={100}
+                  step={5}
+                  value={value ?? 0}
+                  onValueChange={(v) => set(it.id, Math.round(v / 5) * 5)}
+                  minimumTrackTintColor={colors.primary}
+                  maximumTrackTintColor={colors.border}
+                  thumbTintColor={colors.primary}
+                  accessibilityLabel={`${it.name} percent eaten slider`}
+                />
+                <Text style={styles.sliderLabel}>100%</Text>
               </View>
             </Card>
           );
@@ -119,8 +113,12 @@ export function ReviewScreen({ resident, meal, analysis, onConfirmed, onBack }: 
         <Card>
           <Text style={styles.itemName}>Meal total{overall != null ? `: ~${overall}% eaten` : ''}</Text>
           <Text style={styles.meta}>
-            {Math.round(totals.kcal)} kcal · {totals.protein_g.toFixed(1)} g protein · {totals.iron_mg.toFixed(1)} mg iron ·{' '}
-            {Math.round(totals.calcium_mg)} mg calcium
+            {Math.round(totals.kcal)} kcal · {totals.protein_g.toFixed(1)} g protein · {totals.fat_g.toFixed(1)} g fat ·{' '}
+            {Math.round(totals.cholesterol_mg)} mg cholesterol · {totals.sodium_mg.toFixed(0)} mg sodium
+          </Text>
+          <Text style={styles.meta}>
+            {totals.iron_mg.toFixed(1)} mg iron · {Math.round(totals.calcium_mg)} mg calcium · {totals.sugar_g.toFixed(1)} g sugar ·{' '}
+            {totals.vitamin_c_mg.toFixed(1)} mg vit C · {totals.vitamin_d_mcg.toFixed(1)} mcg vit D · {totals.vitamin_b12_mcg.toFixed(1)} mcg vit B12
           </Text>
         </Card>
 
@@ -131,23 +129,22 @@ export function ReviewScreen({ resident, meal, analysis, onConfirmed, onBack }: 
   );
 }
 
-function Step({ label, a11y, onPress }: { label: string; a11y: string; onPress: () => void }) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={a11y} onPress={onPress} style={styles.chip}>
-      <Text style={styles.chipText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 // Mirrors backend/app/nutrition.py so totals update live while staff adjust.
 function consumedTotals(items: MenuItem[], pcts: Record<number, number | null>) {
-  const t = { kcal: 0, protein_g: 0, iron_mg: 0, calcium_mg: 0 };
+  const t = { kcal: 0, protein_g: 0, fat_g: 0, cholesterol_mg: 0, iron_mg: 0, calcium_mg: 0, sodium_mg: 0, sugar_g: 0, vitamin_c_mg: 0, vitamin_d_mcg: 0, vitamin_b12_mcg: 0 };
   for (const it of items) {
     const f = ((pcts[it.id] ?? 0) / 100) * (it.servings ?? 1);
     t.kcal += it.kcal * f;
     t.protein_g += it.protein_g * f;
+    t.fat_g += (it.fat_g ?? 0) * f;
+    t.cholesterol_mg += (it.cholesterol_mg ?? 0) * f;
     t.iron_mg += it.iron_mg * f;
     t.calcium_mg += it.calcium_mg * f;
+    t.sodium_mg += (it.sodium_mg ?? 0) * f;
+    t.sugar_g += (it.sugar_g ?? 0) * f;
+    t.vitamin_c_mg += (it.vitamin_c_mg ?? 0) * f;
+    t.vitamin_d_mcg += (it.vitamin_d_mcg ?? 0) * f;
+    t.vitamin_b12_mcg += (it.vitamin_b12_mcg ?? 0) * f;
   }
   return t;
 }
@@ -177,19 +174,7 @@ const styles = StyleSheet.create({
   pct: { fontSize: 26, fontWeight: '700', color: colors.primary, minWidth: 70, textAlign: 'right' },
   observation: { fontSize: 14, color: colors.text, marginTop: 8, lineHeight: 20 },
   changed: { fontSize: 13, color: colors.warn, marginTop: 4 },
-  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
-  chip: {
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { fontSize: 15, fontWeight: '600', color: colors.text },
-  chipTextOn: { color: colors.primaryText },
+  sliderRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
+  slider: { flex: 1, height: 40 },
+  sliderLabel: { fontSize: 13, color: colors.muted, width: 32, textAlign: 'center' },
 });

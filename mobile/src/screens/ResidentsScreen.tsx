@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { API_URL, getResidents, Resident } from '../api';
+import { ageGroup, API_URL, getResidents, Resident } from '../api';
 import { Banner, Button, Header } from '../components/ui';
 import { colors } from '../theme';
 
@@ -52,7 +52,10 @@ export function ResidentsScreen({ onSelect }: { onSelect: (r: Resident) => void 
             >
               <View style={styles.flex}>
                 <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.meta}>Room {item.room}{tags ? ` · ${tags}` : ''}</Text>
+                <Text style={styles.meta}>
+                  Room {item.room} · {item.sex === 'male' ? 'M' : 'F'} · {ageGroup(item.dob)}
+                  {tags ? ` · ${tags}` : ''}
+                </Text>
                 {item.allergies.length > 0 && (
                   <Text style={styles.allergy}>Allergies: {item.allergies.join(', ')}</Text>
                 )}

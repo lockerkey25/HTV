@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +10,10 @@ import { MealsScreen } from './src/screens/MealsScreen';
 import { ResidentsScreen } from './src/screens/ResidentsScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { colors } from './src/theme';
+import {
+  requestNotificationPermission,
+  scheduleMealReminders,
+} from './src/notifications';
 
 // Simple state-machine navigation for the linear CNA flow:
 // residents -> meals -> capture (before/after) -> review -> done
@@ -21,6 +26,13 @@ type Screen =
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'residents' });
+
+  useEffect(() => {
+    requestNotificationPermission().then((granted) => {
+      if (!granted) return;
+      scheduleMealReminders();
+    });
+  }, []);
 
   return (
     <SafeAreaProvider>
