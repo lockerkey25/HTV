@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Nourish",
+    "slug": "nourish",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Nourish uses the camera to photograph meal trays and estimate how much was eaten."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Nourish lets you pick saved tray photos to estimate how much was eaten."
+        }
+      ],
+      "expo-status-bar"
+    ],
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
