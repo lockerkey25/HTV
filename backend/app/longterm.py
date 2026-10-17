@@ -5,6 +5,11 @@ from . import baselines
 
 NUTRIENTS = ["kcal", "protein_g", "fat_g", "cholesterol_mg", "sodium_mg", "iron_mg",
              "calcium_mg", "sugar_g", "vitamin_c_mg", "vitamin_d_mcg", "vitamin_b12_mcg"]
+LABELS = {
+    "kcal": "Calories", "protein_g": "Protein", "fat_g": "Fat", "cholesterol_mg": "Cholesterol",
+    "sodium_mg": "Sodium", "iron_mg": "Iron", "calcium_mg": "Calcium", "sugar_g": "Sugar",
+    "vitamin_c_mg": "Vitamin C", "vitamin_d_mcg": "Vitamin D", "vitamin_b12_mcg": "Vitamin B12",
+}
 MEALS_PER_DAY = 3
 MISSED_BELOW_PCT = 25   # a confirmed meal under this % (calorie-weighted) counts as missed
 
@@ -79,6 +84,25 @@ def intake_history(conn, resident: dict, days: int = 30) -> dict:
         vals = [v for v in total_out[n] if v is not None]
         avg[n] = _r(n, sum(vals) / len(vals)) if vals else None
 
+    # Classify each nutrient's 30-day average against its target: severe | warning | ok.
+    severe: list[str] = []
+    warning: list[str] = []
+    for n in NUTRIENTS:
+        a = avg[n]
+        if a is None:
+            continue
+        lo = targets.get(n, {}).get("min")
+        hi = targets.get(n, {}).get("max")
+        label = LABELS.get(n, n)
+        if lo is not None and a < lo * 0.75:
+            severe.append(f"{label} low")
+        elif hi is not None and a > hi * 1.2:
+            severe.append(f"{label} high")
+        elif lo is not None and a < lo * 0.9:
+            warning.append(f"{label} low")
+        elif hi is not None and a > hi:
+            warning.append(f"{label} high")
+
     return {
         "resident_id": resident["id"],
         "dates": dates,
@@ -93,5 +117,7 @@ def intake_history(conn, resident: dict, days: int = 30) -> dict:
             "days_with_full_logs": sum(complete),
             "meals_missed": sum(meals_missed),
             "average": avg,
+            "severe_alerts": severe,
+            "warning_alerts": warning,
         },
     }

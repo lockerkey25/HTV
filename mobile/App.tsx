@@ -6,7 +6,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AnalyzeResponse, ConfirmResponse, Meal, Resident } from './src/api';
 import { CaptureScreen } from './src/screens/CaptureScreen';
 import { DoneScreen } from './src/screens/DoneScreen';
+import { EditMenuScreen } from './src/screens/EditMenuScreen';
 import { MealsScreen } from './src/screens/MealsScreen';
+import { NutrientCharts } from './src/screens/NutrientCharts';
 import { ResidentsScreen } from './src/screens/ResidentsScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { colors } from './src/theme';
@@ -22,7 +24,9 @@ type Screen =
   | { name: 'meals'; resident: Resident }
   | { name: 'capture'; resident: Resident; meal: Meal }
   | { name: 'review'; resident: Resident; meal: Meal; analysis: AnalyzeResponse | null }
-  | { name: 'done'; resident: Resident; meal: Meal; result: ConfirmResponse };
+  | { name: 'done'; resident: Resident; meal: Meal; result: ConfirmResponse }
+  | { name: 'charts'; resident: Resident }
+  | { name: 'editMenu'; resident: Resident; meal: Meal };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'residents' });
@@ -46,6 +50,8 @@ export default function App() {
             resident={screen.resident}
             onBack={() => setScreen({ name: 'residents' })}
             onSelect={(meal) => setScreen({ name: 'capture', resident: screen.resident, meal })}
+            onViewCharts={() => setScreen({ name: 'charts', resident: screen.resident })}
+            onEditMenu={(meal) => setScreen({ name: 'editMenu', resident: screen.resident, meal })}
           />
         )}
         {screen.name === 'capture' && (
@@ -74,6 +80,20 @@ export default function App() {
             meal={screen.meal}
             result={screen.result}
             onNext={() => setScreen({ name: 'meals', resident: screen.resident })}
+          />
+        )}
+        {screen.name === 'charts' && (
+          <NutrientCharts
+            residentId={screen.resident.id}
+            onBack={() => setScreen({ name: 'meals', resident: screen.resident })}
+          />
+        )}
+        {screen.name === 'editMenu' && (
+          <EditMenuScreen
+            resident={screen.resident}
+            meal={screen.meal}
+            onBack={() => setScreen({ name: 'meals', resident: screen.resident })}
+            onSaved={() => setScreen({ name: 'meals', resident: screen.resident })}
           />
         )}
       </SafeAreaView>

@@ -162,6 +162,71 @@ def resident_meals(resident_id: int, meal_date: str | None = None):
         return [db.get_meal(conn, r["id"]) for r in rows]
 
 
+@app.get("/api/menu-items")
+def list_menu_items(resident_id: int | None = None):
+    """Full menu catalogue. If resident_id is given, annotate each item with a
+    safety check (safe | warning | block) against that resident's profile."""
+    with db.connect() as conn:
+        rows = conn.execute("SELECT * FROM menu_items ORDER BY food_group, name").fetchall()
+        items = [{**dict(r), "allergens": json.loads(r["allergens"])} for r in rows]
+
+        resident = db.get_resident(conn, resident_id) if resident_id is not None else None
+
+    if resident is None:
+        return items
+
+    allergies = set(resident["allergies"])
+    res_level = diet_rules.TEXTURE_LEVEL[resident["texture"]]
+    low_sodium = "low_sodium" in resident["diet_flags"]
+    preferences = [p.lower() for p in resident.get("preferences", [])]
+
+    for it in items:
+        warnings: list[str] = []
+        level = "safe"
+        # Allergy = hard block
+        hit = allergies.intersection(it["allergens"])
+        if hit:
+            level = "block"
+            warnings.append(f"Contains {', '.join(sorted(hit))} — resident is allergic.")
+        # Texture = hard block
+        if diet_rules.TEXTURE_LEVEL[it["texture"]] < res_level:
+            level = "block"
+            warnings.append(f"{it['texture']} texture; resident needs {resident['texture']}.")
+        # Low sodium = warning
+        if low_sodium and it["sodium_mg"] > diet_rules.LOW_SODIUM_ITEM_LIMIT_MG:
+            if level != "block":
+                level = "warning"
+            warnings.append(f"High sodium ({it['sodium_mg']:.0f} mg); resident is low-sodium.")
+        # Preference dislike = warning
+        for pref in preferences:
+            if any(word in it["name"].lower() for word in pref.split() if len(word) > 3):
+                if level != "block":
+                    level = "warning"
+                warnings.append(f"Resident preference: {pref}.")
+        it["safety"] = level
+        it["safety_warnings"] = warnings
+
+    return items
+
+
+@app.put("/api/meals/{meal_id}/items")
+def update_meal_items(meal_id: int, body: dict):
+    """Replace the items served for a meal. body: {menu_item_ids: [int, ...]}"""
+    ids = body.get("menu_item_ids", [])
+    with db.connect() as conn:
+        meal = db.get_meal(conn, meal_id)
+        if meal is None:
+            raise HTTPException(404, "meal not found")
+        if meal["status"] == "confirmed":
+            raise HTTPException(422, "cannot edit a confirmed meal")
+        conn.execute("DELETE FROM meal_items WHERE meal_id = ?", (meal_id,))
+        conn.executemany(
+            "INSERT INTO meal_items (meal_id, menu_item_id) VALUES (?, ?)",
+            [(meal_id, int(i)) for i in ids],
+        )
+        return db.get_meal(conn, meal_id)
+
+
 @app.get("/api/meals/{meal_id}")
 def get_meal(meal_id: int):
     with db.connect() as conn:
@@ -306,7 +371,7 @@ def confirm_meal(meal_id: int, body: ConfirmRequest):
         adjusted_items=[m for m, p in given.items() if m in ai_pcts and ai_pcts[m] != p],
     )
 
-from . import analysis, config, db, diet_rules, gemini, images, longterm, nutrition   # add longterm
+from . import analysis, baselines, config, db, diet_rules, gemini, images, longterm, nutrition
 
 @app.get("/api/residents/{resident_id}/intake-history")
 def intake_history(resident_id: int, days: int = 30):
@@ -315,3 +380,59 @@ def intake_history(resident_id: int, days: int = 30):
         if resident is None:
             raise HTTPException(404, "resident not found")
         return longterm.intake_history(conn, resident, days)
+
+
+@app.get("/api/residents/{resident_id}/health-assessment")
+async def health_assessment(resident_id: int, days: int = 30):
+    with db.connect() as conn:
+        resident = db.get_resident(conn, resident_id)
+        if resident is None:
+            raise HTTPException(404, "resident not found")
+        history = longterm.intake_history(conn, resident, days)
+
+    # Build a readable profile block.
+    profile = (
+        f"Name: {resident['name']}\n"
+        f"Sex: {resident['sex']}\n"
+        f"Age group: {baselines.age_group(resident['dob'])} "
+        f"(DOB {resident['dob']})\n"
+        f"Height: {resident['height_cm']} cm\n"
+        f"Conditions: {', '.join(resident['conditions']) or 'none recorded'}\n"
+        f"Medications: {', '.join(m['name'] + ' ' + m['dose_per_day'] for m in resident['medications']) or 'none recorded'}"
+    )
+
+    # Build the nutrient comparison block.
+    avg = history["summary"]["average"]
+    targets = history["targets"]
+    lines = []
+    for n in history["nutrients"]:
+        a = avg.get(n)
+        t = targets.get(n, {})
+        lo, hi = t.get("min"), t.get("max")
+        target_str = (
+            f"{round(lo)}–{round(hi)}" if lo is not None and hi is not None
+            else f"min {round(lo)}" if lo is not None
+            else f"max {round(hi)}" if hi is not None
+            else "no target"
+        )
+        label = longterm.LABELS.get(n, n)
+        lines.append(f"- {label}: avg {a if a is not None else 'no data'} (target {target_str})")
+    nutrients = "\n".join(lines)
+
+    weights = [w for w in history["weight_kg"] if w is not None]
+    weight_trend = "no weight data"
+    if len(weights) >= 2:
+        delta = weights[-1] - weights[0]
+        weight_trend = f"{weights[0]} kg → {weights[-1]} kg ({'+' if delta >= 0 else ''}{round(delta, 1)} kg over period)"
+    signals = (
+        f"Days fully logged: {history['summary']['days_with_full_logs']} of {days}\n"
+        f"Meals under 25% eaten: {history['summary']['meals_missed']}\n"
+        f"Weight trend: {weight_trend}"
+    )
+
+    try:
+        result = await gemini.assess_health(profile, nutrients, signals)
+    except gemini.AnalysisUnavailable as e:
+        raise HTTPException(503, f"assessment unavailable ({e})")
+
+    return result.model_dump()

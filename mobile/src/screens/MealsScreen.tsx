@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ageGroup, getMeals, getSupplementLogs, getWeight, Meal, Resident, saveSupplementLogs, saveWeight, SupplementLog } from '../api';
+import { ageGroup, getIntakeSummary, getMeals, getSupplementLogs, getWeight, IntakeSummary, Meal, Resident, saveSupplementLogs, saveWeight, SupplementLog } from '../api';
 import { Banner, Button, Header } from '../components/ui';
 import { colors, mealLabel } from '../theme';
 
-type Props = { resident: Resident; onSelect: (m: Meal) => void; onBack: () => void };
+type Props = { resident: Resident; onSelect: (m: Meal) => void; onBack: () => void; onViewCharts: () => void; onEditMenu: (m: Meal) => void };
 
-export function MealsScreen({ resident, onSelect, onBack }: Props) {
+export function MealsScreen({ resident, onSelect, onBack, onViewCharts, onEditMenu }: Props) {
   const [meals, setMeals] = useState<Meal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [supplements, setSupplements] = useState<SupplementLog[] | null>(null);
@@ -20,8 +20,11 @@ export function MealsScreen({ resident, onSelect, onBack }: Props) {
   const [weightSaved, setWeightSaved] = useState(false);
   const [weightError, setWeightError] = useState<string | null>(null);
 
+  const [intakeSummary, setIntakeSummary] = useState<IntakeSummary | null>(null);
+
   useEffect(() => {
     getMeals(resident.id).then(setMeals).catch((e: Error) => setError(e.message));
+    getIntakeSummary(resident.id).then(setIntakeSummary).catch(() => {});
     getSupplementLogs(resident.id).then((logs) => {
       setSupplements(logs);
       setTablets(Object.fromEntries(logs.map((s) => [s.id, s.tablets])));
@@ -118,6 +121,24 @@ export function MealsScreen({ resident, onSelect, onBack }: Props) {
               <Text style={styles.infoValue}>{resident.medications.map((m) => `${m.name} ${m.dose_per_day}`).join('\n')}</Text>
             </View>
           )}
+          {intakeSummary && intakeSummary.severe_alerts.length > 0 && (
+            <View style={styles.infoRow}>
+              <Text style={[styles.infoLabel, { color: colors.danger }]}>Severe (30-day avg)</Text>
+              <Text style={[styles.infoValue, { color: colors.danger }]}>{intakeSummary.severe_alerts.join(', ')}</Text>
+            </View>
+          )}
+          {intakeSummary && intakeSummary.warning_alerts.length > 0 && (
+            <View style={styles.infoRow}>
+              <Text style={[styles.infoLabel, { color: colors.warn }]}>Warnings (30-day avg)</Text>
+              <Text style={[styles.infoValue, { color: colors.warn }]}>{intakeSummary.warning_alerts.join(', ')}</Text>
+            </View>
+          )}
+          {intakeSummary && intakeSummary.meals_missed > 5 && (
+            <View style={styles.infoRow}>
+              <Text style={[styles.infoLabel, { color: colors.danger }]}>Meals missed</Text>
+              <Text style={[styles.infoValue, { color: colors.danger }]}>{intakeSummary.meals_missed} in last 30 days</Text>
+            </View>
+          )}
         </View>
 
         {/* Weight logging */}
@@ -143,13 +164,7 @@ export function MealsScreen({ resident, onSelect, onBack }: Props) {
         {meals?.map((meal) => {
           const done = meal.status === 'confirmed';
           return (
-            <Pressable
-              key={meal.id}
-              accessibilityRole="button"
-              accessibilityLabel={`${mealLabel[meal.meal_type]}${done ? ', already logged' : ''}`}
-              onPress={() => onSelect(meal)}
-              style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}
-            >
+            <View key={meal.id} style={styles.row}>
               <View style={styles.titleRow}>
                 <Text style={styles.name}>{mealLabel[meal.meal_type]}</Text>
                 <Text style={[styles.badge, done ? styles.badgeDone : styles.badgeTodo]}>
@@ -157,7 +172,27 @@ export function MealsScreen({ resident, onSelect, onBack }: Props) {
                 </Text>
               </View>
               <Text style={styles.meta}>{meal.items.map((i) => i.name).join(' · ')}</Text>
-            </Pressable>
+              <View style={styles.mealActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Log ${mealLabel[meal.meal_type]}`}
+                  onPress={() => onSelect(meal)}
+                  style={({ pressed }) => [styles.mealBtn, styles.mealBtnPrimary, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.mealBtnPrimaryText}>Log intake</Text>
+                </Pressable>
+                {!done && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${mealLabel[meal.meal_type]} menu`}
+                    onPress={() => onEditMenu(meal)}
+                    style={({ pressed }) => [styles.mealBtn, styles.mealBtnSecondary, pressed && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.mealBtnSecondaryText}>Edit menu</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
           );
         })}
 
@@ -201,6 +236,8 @@ export function MealsScreen({ resident, onSelect, onBack }: Props) {
             <Button label="Save supplements" onPress={saveSupplements} loading={suppSaving} />
           </View>
         )}
+
+        <Button label="View nutrient charts" onPress={onViewCharts} variant="secondary" style={styles.chartsBtn} />
       </ScrollView>
     </View>
   );
@@ -235,6 +272,12 @@ const styles = StyleSheet.create({
   badge: { fontSize: 13, fontWeight: '600', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, overflow: 'hidden' },
   badgeDone: { backgroundColor: colors.okBg, color: colors.primary },
   badgeTodo: { backgroundColor: colors.warnBg, color: colors.warn },
+  mealActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  mealBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  mealBtnPrimary: { backgroundColor: colors.primary },
+  mealBtnPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  mealBtnSecondary: { backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.primary },
+  mealBtnSecondaryText: { color: colors.primary, fontSize: 15, fontWeight: '600' },
   sectionHeader: { fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 20, marginBottom: 10 },
   weightRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   weightInput: {
@@ -279,4 +322,5 @@ const styles = StyleSheet.create({
   counterBtnText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 28 },
   counterNum: { fontSize: 20, fontWeight: '700', color: colors.text, minWidth: 28, textAlign: 'center' },
   suppSaveRow: { marginTop: 4, gap: 8 },
+  chartsBtn: { marginTop: 16 },
 });
