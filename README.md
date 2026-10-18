@@ -345,9 +345,3 @@ Get-NetTCPConnection -LocalPort 8000 | Select-Object -ExpandProperty OwningProce
 **Charts / health review are empty** — these need confirmed intake history to aggregate. They populate as meals are confirmed over multiple days.
 
 **Android scheduled notifications don't fire** — Android 13+ restricts repeating calendar triggers in Expo Go; a development build is needed. iOS works in Expo Go.
-
----
-
-## Out of scope
-
-Authentication, real EHR integration, and conditions outside nutrition decline. The nutrient values are approximate USDA-based figures seeded by hand and are **not** medical-grade — verify with a dietitian before any real use. The AI health review is decision-support for staff, **not** a diagnosis. This is a hackathon demo built on synthetic resident data.
