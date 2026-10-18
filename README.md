@@ -2,6 +2,9 @@
 
 **Nutrition decline early-warning app for elderly care teams.**
 
+<img width="1348" height="718" alt="Screenshot 2026-10-18 at 07 57 34" src="https://github.com/user-attachments/assets/ca40c75e-367c-4287-a163-c0601d01b621" />
+
+
 Care staff (CNAs) use their phone to photograph a resident's meal tray before and after a meal. Gemini compares the two photos and estimates how much of each served item was eaten. Rule-based scoring then tracks intake, nutrient, and weight trends over time to flag early signs of malnutrition, sarcopenia, anemia, and other nutrition-linked conditions, with plain-language explanations staff can act on.
 
 **Design principle:** rules decide what gets flagged; Gemini only describes what it sees and explains what the rules found. Staff confirm every AI estimate before it counts toward a resident's record.
