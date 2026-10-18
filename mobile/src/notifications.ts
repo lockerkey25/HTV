@@ -18,7 +18,7 @@ import { getUnloggedMeals } from './api';
 export type MealType = 'breakfast' | 'lunch' | 'dinner';
 
 const MEAL_CUTOFFS: { mealType: MealType; hour: number; minute: number }[] = [
-  { mealType: 'breakfast', hour: 10, minute: 40 },
+  { mealType: 'breakfast', hour: 10, minute: 0 },
   { mealType: 'lunch', hour: 14, minute: 0 },
   { mealType: 'dinner', hour: 20, minute: 0 },
 ];
