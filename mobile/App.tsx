@@ -32,10 +32,13 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'residents' });
 
   useEffect(() => {
-    requestNotificationPermission().then((granted) => {
-      if (!granted) return;
-      scheduleMealReminders();
-    });
+    requestNotificationPermission()
+      .then((granted) => {
+        if (granted) return scheduleMealReminders();
+      })
+      .catch(() => {
+        // Notifications unavailable (e.g. Expo Go on newer SDKs) — ignore, app still works.
+      });
   }, []);
 
   return (

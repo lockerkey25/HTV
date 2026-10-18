@@ -436,3 +436,61 @@ async def health_assessment(resident_id: int, days: int = 30):
         raise HTTPException(503, f"assessment unavailable ({e})")
 
     return result.model_dump()
+
+
+# --- Dev helpers (demo only; no auth). Reset logged data without wiping history. ---
+
+@app.post("/api/dev/reset-meal")
+def dev_reset_meal(resident_id: int | None = None, meal_type: str | None = None,
+                   meal_date: str | None = None):
+    """Unlog meals: delete confirmed intake + saved analyses and set status back to 'served'.
+    Optional filters: resident_id, meal_type (breakfast|lunch|dinner), meal_date (defaults today)."""
+    meal_date = meal_date or date.today().isoformat()
+    clauses = ["meal_date = ?"]
+    params: list = [meal_date]
+    if resident_id is not None:
+        clauses.append("resident_id = ?")
+        params.append(resident_id)
+    if meal_type is not None:
+        clauses.append("meal_type = ?")
+        params.append(meal_type)
+    where = " AND ".join(clauses)
+
+    with db.connect() as conn:
+        rows = conn.execute(f"SELECT id FROM meals WHERE {where}", params).fetchall()
+        ids = [r["id"] for r in rows]
+        for meal_id in ids:
+            conn.execute("DELETE FROM intake_records WHERE meal_id = ?", (meal_id,))
+            conn.execute("DELETE FROM meal_analyses WHERE meal_id = ?", (meal_id,))
+            conn.execute("UPDATE meals SET status = 'served' WHERE id = ?", (meal_id,))
+    return {"reset_meals": ids, "meal_date": meal_date}
+
+
+@app.post("/api/dev/reset-weight")
+def dev_reset_weight(resident_id: int | None = None, log_date: str | None = None):
+    """Delete weight logs. Optional filters: resident_id, log_date (defaults today)."""
+    log_date = log_date or date.today().isoformat()
+    clauses = ["log_date = ?"]
+    params: list = [log_date]
+    if resident_id is not None:
+        clauses.append("resident_id = ?")
+        params.append(resident_id)
+    where = " AND ".join(clauses)
+    with db.connect() as conn:
+        n = conn.execute(f"DELETE FROM weight_logs WHERE {where}", params).rowcount
+    return {"deleted": n, "log_date": log_date}
+
+
+@app.post("/api/dev/reset-supplements")
+def dev_reset_supplements(resident_id: int | None = None, log_date: str | None = None):
+    """Delete supplement logs. Optional filters: resident_id, log_date (defaults today)."""
+    log_date = log_date or date.today().isoformat()
+    clauses = ["log_date = ?"]
+    params: list = [log_date]
+    if resident_id is not None:
+        clauses.append("resident_id = ?")
+        params.append(resident_id)
+    where = " AND ".join(clauses)
+    with db.connect() as conn:
+        n = conn.execute(f"DELETE FROM supplement_logs WHERE {where}", params).rowcount
+    return {"deleted": n, "log_date": log_date}

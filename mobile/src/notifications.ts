@@ -24,42 +24,60 @@ const MEAL_CUTOFFS: { mealType: MealType; hour: number; minute: number }[] = [
 ];
 
 // How to handle notifications when the app is in the foreground.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+// Wrapped in try/catch and skipped on web — in Expo Go on newer SDKs the
+// notifications native module can be unavailable and throw at registration,
+// which otherwise cascades into an RCTEventEmitter bridge error.
+if (Platform.OS !== 'web') {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch {
+    // notifications not available in this runtime — reminders simply won't fire
+  }
+}
 
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') return true;
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    return false;
+  }
 }
 
 export async function scheduleMealReminders(): Promise<void> {
   if (Platform.OS === 'web') return;
-  for (const { mealType, hour, minute } of MEAL_CUTOFFS) {
-    const id = `meal-reminder-${mealType}`;
-    await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
-    const label = mealType.charAt(0).toUpperCase() + mealType.slice(1);
-    await Notifications.scheduleNotificationAsync({
-      identifier: id,
-      content: {
-        title: `${label} meal check`,
-        body: `Time to check if all ${mealType} trays have been logged.`,
-        data: { mealType },
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
-        hour,
-        minute,
-        repeats: true,
-      },
-    });
+  try {
+    for (const { mealType, hour, minute } of MEAL_CUTOFFS) {
+      const id = `meal-reminder-${mealType}`;
+      await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+      const label = mealType.charAt(0).toUpperCase() + mealType.slice(1);
+      await Notifications.scheduleNotificationAsync({
+        identifier: id,
+        content: {
+          title: `${label} meal check`,
+          body: `Time to check if all ${mealType} trays have been logged.`,
+          data: { mealType },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+          hour,
+          minute,
+          repeats: true,
+        },
+      });
+    }
+  } catch {
+    // notifications unavailable in this runtime
   }
 }
 
