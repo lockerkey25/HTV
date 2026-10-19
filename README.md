@@ -268,15 +268,42 @@ SQLite tables (`backend/app/db.py`):
 
 **Nutrients tracked:** kcal, protein, fat, cholesterol, sodium, iron, calcium, sugar, vitamin C, vitamin D, vitamin B12. Consumed amounts are **computed on demand** (per-serving × servings × percent eaten), never stored — so correcting a food's values updates all history automatically.
 
-To reset the database (re-seeds residents, menu, and today's meals):
+### Resetting demo data
 
-```bash
-# macOS / Linux
-rm backend/data/nourish.db
-# Windows
-Remove-Item backend\data\nourish.db
+During a demo you'll log meals, weights, and supplements. To wipe that session data and
+restore the database to its **fresh first-load state** (residents, full menu, the
+reproducible 30-day synthetic history, and today's unlogged meals), use the reset tool.
+
+**Stop the backend first** — Windows locks the SQLite file while uvicorn is running.
+
+**Windows** — double-click `backend/reset_demo.bat`, or run:
+```powershell
+cd backend
+.venv\Scripts\python.exe reset_demo.py
 ```
-Restart the backend afterward.
+
+**macOS / Linux**:
+```bash
+cd backend
+.venv/bin/python reset_demo.py
+```
+
+Then restart the backend. The 30-day history is generated from a fixed random seed, so the
+reset is fully reproducible — every reset yields the same baseline.
+
+> Manual alternative: delete `backend/data/nourish.db` and restart the backend; it
+> re-seeds automatically on the next request.
+
+**Targeted resets (backend running, no restart needed)** — dev-only endpoints let you unlog
+specific data without rebuilding everything. Call them from `<backend>/docs` or directly:
+```powershell
+# Unlog all breakfasts today
+Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/dev/reset-meal?meal_type=breakfast" -UseBasicParsing
+# Unlog one resident's breakfast (resident_id 1 = Okafor, 2 = Lindqvist, 3 = Tanaka)
+Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/dev/reset-meal?resident_id=1&meal_type=breakfast" -UseBasicParsing
+# Clear today's weight logs
+Invoke-WebRequest -Method POST -Uri "http://localhost:8000/api/dev/reset-weight" -UseBasicParsing
+```
 
 ---
 
@@ -303,6 +330,11 @@ Base path: `/api`. Full interactive docs at `/docs`.
 | POST | `/residents/{id}/supplements` | Save supplement tablet counts |
 | GET | `/residents/{id}/intake-history?days=30` | 30-day nutrient/weight trends + alerts |
 | GET | `/residents/{id}/health-assessment` | Gemini health review (flags, recommendations) |
+| POST | `/dev/reset-meal` | Unlog meals (optional `resident_id`, `meal_type`, `meal_date`) |
+| POST | `/dev/reset-weight` | Delete weight logs (optional `resident_id`, `log_date`) |
+| POST | `/dev/reset-supplements` | Delete supplement logs (optional `resident_id`, `log_date`) |
+
+> The `/dev/*` endpoints are demo helpers with no auth — remove them before any real deployment.
 
 ---
 
